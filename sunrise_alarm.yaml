@@ -1,0 +1,207 @@
+blueprint:
+  name: Sunrise Alarm Blueprint
+  description: Make a light slowly turn on in the morning to wake up naturally
+  domain: automation
+
+  input:
+    alarm_light:
+      name: Lights
+      description: The lights to use for the alarm.
+      selector:
+        target:
+          entity:
+            - domain: light
+
+    time_entity:
+      name: Alarm Time
+      description: What time the alarm should be finished at
+      selector:
+        entity:
+          domain: input_datetime
+
+    conditions:
+      name: Conditions for alarm
+      description: All conditions needs to pass for the alarm to run
+      default: []
+      selector:
+        condition: {}
+
+    sunrise_start:
+      name: Sunrise start
+      description: When the sunrise should start in comparison to the alarm time (Should be a negative number)
+      default: "-00:30:00"
+      selector:
+        text:
+
+    max_brightness:
+      name: Max brightness
+      description: The maximum brightness that should have been reached when the alarm goes off
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 100
+
+    post_alarm_actions:
+      name: Post alarm actions
+      description: Actions to execute after the sunrise alarm is finished
+      default: []
+      selector:
+        action: {}
+
+    kelvin_start:
+      name: Kelvin start value
+      description: The warmest value that the light should take, just when the sun starts to rise
+      default: 1500
+      selector:
+        number:
+          min: 1500
+          max: 10000
+
+    kelvin_end:
+      name: Kelvin end value
+      description: The coldes value that the light should take, just alarm is about to go off
+      default: 3500
+      selector:
+        number:
+          min: 1500
+          max: 10000
+
+    transition_time:
+      name: Transition time
+      description: The time under witch the lights should fade between states
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 300
+          unit_of_measurement: seconds
+
+    update_frequenzy:
+      name: Update frequenzy
+      description: How long it should be between light state updates
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 300
+          unit_of_measurement: seconds
+
+    brightness_curve:
+      name: Brightness curve
+      description: |
+        define a custom brightness curve, use 'progress' [0,1] to calculate another value in range
+        [0,1], this value will be used for brightness control
+      default: "{{ (progress ** 2 * 3 - progress ** 3 * 2) | float }}"
+      selector:
+        template:
+
+    warmth_curve:
+      name: Warmth curve
+      description: |
+        define a custom warmth curve, use 'progress' [0,1] to calculate another value in range
+        [0,1], this value will be used for warmth control
+      default: "{{ (progress ** 2 * 3 - progress ** 3 * 2) | float }}"
+      selector:
+        template:
+
+triggers:
+  - at:
+      entity_id: !input time_entity
+      offset: !input sunrise_start
+    trigger: time
+conditions:
+  condition: and
+  conditions: !input conditions
+actions:
+  - variables:
+      max_brightness: !input max_brightness
+      brightness_value: 0
+      kelvin_start: !input kelvin_start
+      kelvin_end: !input kelvin_end
+      target_light: !input alarm_light
+      wake_time_entity: !input time_entity
+      wake_time: "{{states(wake_time_entity)}}"
+      time_stamp_duration: !input sunrise_start
+      duration: >
+        {% set parts = time_stamp_duration.split(":") %}
+        {{ (parts[0]|int)*3600 + (parts[1]|int)*60 + (parts[2]|int) }}
+      progress: >
+        {{ [0, [1, ((duration - (as_timestamp(today_at(wake_time)) -
+        as_timestamp(now()))) / duration)] | min] | max | float() }}
+      last_light_update: >-
+        {{ [states[target_light.entity_id].attributes.brightness,
+        states[target_light.entity_id].attributes.rgb_color] }}
+
+  - variables:
+      brightness_value: !input brightness_curve
+      warmth_value: !input warmth_curve
+
+  - repeat:
+      until:
+        - condition: or
+          conditions:
+            - condition: time
+              after: input_datetime.wake_up_light
+            - condition: template
+              value_template: >
+                {{ last_light_update !=
+                [states[target_light.entity_id].attributes.brightness,
+                states[target_light.entity_id].attributes.rgb_color]}}
+              enabled: true
+      sequence:
+        - variables:
+            progress: >
+              {{ [0, [1, ((duration - (as_timestamp(today_at(wake_time)) -
+              as_timestamp(now()))) / duration)] | min] | max | float() }}
+
+        - variables:
+            brightness_value: !input brightness_curve
+            warmth_value: !input warmth_curve
+
+        - target:
+            entity_id: "{{ target_light.entity_id }}"
+          data:
+            brightness_pct: >-
+              {{ max((brightness_value | float) * (max_brightness | float), 1)
+              }}
+            color_temp_kelvin: >-
+              {{kelvin_start | float + (warmth_value | float) * (kelvin_end -
+              kelvin_start)}}
+            transition: !input transition_time
+          action: light.turn_on
+
+        - variables:
+            last_light_update: >-
+              {{ [states[target_light.entity_id].attributes.brightness,
+              states[target_light.entity_id].attributes.rgb_color] }}
+        - delay:
+            hours: 0
+            minutes: 0
+            seconds: !input update_frequenzy
+            milliseconds: 0
+    enabled: true
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ last_light_update !=
+              [states[target_light.entity_id].attributes.brightness,
+              states[target_light.entity_id].attributes.rgb_color]}}
+        sequence:
+          - target:
+              entity_id: "{{ target_light.entity_id }}"
+            data:
+              brightness_pct: |
+                {{ max_brightness | int }}
+              color_temp_kelvin: |
+                {{kelvin_end | int }}
+              transition: !input transition_time
+            action: light.turn_on
+
+  - choose:
+      - conditions: []
+        sequence: !input post_alarm_actions
+
+mode: single
