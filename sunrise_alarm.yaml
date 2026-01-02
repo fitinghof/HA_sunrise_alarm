@@ -17,7 +17,10 @@ blueprint:
       description: What time the alarm should be finished at
       selector:
         entity:
-          domain: input_datetime
+          filter:
+            - domain: input_datetime
+            - domain: sensor
+              device_class: timestamp
 
     conditions:
       name: Conditions for alarm
@@ -121,7 +124,17 @@ actions:
       kelvin_end: !input kelvin_end
       target_light: !input alarm_light
       wake_time_entity: !input time_entity
-      wake_time: "{{states(wake_time_entity)}}"
+      wake_time: >-
+        {% set raw = states(wake_time_entity) %}
+        {% if raw %}
+          {% if raw|regex_match('^\\d{1,2}:\\d{2}:\\d{2}$') %}
+            {{ raw }}
+          {% else %}
+            {{ as_datetime(raw).strftime('%H:%M:%S') }}
+          {% endif %}
+        {% else %}
+          00:00:00
+        {% endif %}
       time_stamp_duration: !input sunrise_start
       duration: >
         {% set parts = time_stamp_duration.split(":") %}
