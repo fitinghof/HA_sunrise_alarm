@@ -52,23 +52,19 @@ blueprint:
       selector:
         action: {}
 
-    kelvin_start:
-      name: Kelvin start value
-      description: The warmest value that the light should take, just when the sun starts to rise
-      default: 1500
+    color_start:
+      name: Color start value
+      description: The color to start fading from, most likely a warm color that is less noticeable
+      default: [255, 0, 0]
       selector:
-        number:
-          min: 1500
-          max: 10000
+        color_rgb:
 
-    kelvin_end:
-      name: Kelvin end value
-      description: The coldes value that the light should take, just alarm is about to go off
-      default: 3500
+    color_end:
+      name: Color end value
+      description: The final color the light takes on when the alarm goes off
+      default: [255, 196, 137]
       selector:
-        number:
-          min: 1500
-          max: 10000
+        color_rgb:
 
     transition_time:
       name: Transition time
@@ -80,8 +76,8 @@ blueprint:
           max: 300
           unit_of_measurement: seconds
 
-    update_frequenzy:
-      name: Update frequenzy
+    update_frequency:
+      name: Update frequency
       description: How long it should be between light state updates
       default: 30
       selector:
@@ -95,16 +91,16 @@ blueprint:
       description: |
         define a custom brightness curve, use 'progress' [0,1] to calculate another value in range
         [0,1], this value will be used for brightness control
-      default: "{{ (progress ** 2 * 3 - progress ** 3 * 2) | float }}"
+      default: "{{ ((progress | float) ** 2 * 3 - (progress | float) ** 3 * 2) | float }}"
       selector:
         template:
 
-    warmth_curve:
-      name: Warmth curve
+    color_curve:
+      name: Color curve
       description: |
-        define a custom warmth curve, use 'progress' [0,1] to calculate another value in range
-        [0,1], this value will be used for warmth control
-      default: "{{ (progress ** 2 * 3 - progress ** 3 * 2) | float }}"
+        define a custom color curve, use 'progress' [0,1] to calculate another value in range
+        [0,1], this value will be used color interpolation between start and end colors
+      default: "{{ ((progress | float) ** 2 * 3 - (progress | float) ** 3 * 2) | float }}"
       selector:
         template:
 
@@ -120,42 +116,54 @@ actions:
   - variables:
       max_brightness: !input max_brightness
       brightness_value: 0
-      kelvin_start: !input kelvin_start
-      kelvin_end: !input kelvin_end
+      rgb_start: !input color_start
+      rgb_end: !input color_end
       target_light: !input alarm_light
       wake_time_entity: !input time_entity
-      wake_time: >-
-        {% set raw = states(wake_time_entity) %}
-        {% if raw %}
-          {% if raw|regex_match('^\\d{1,2}:\\d{2}:\\d{2}$') %}
-            {{ raw }}
+
+      entity: "{{ states(wake_time_entity) }}"
+      domain: "{{ wake_time_entity.split('.')[0] }}"
+      timestamp_value: >
+        {% set state_val = entity %}
+        {% if domain == 'sensor' %}
+          {{ as_timestamp(state_val) }}
+        {% elif domain == 'input_datetime' %}
+          {% if ' ' in state_val %}
+            {{ as_timestamp(state_val) }}
           {% else %}
-            {{ as_datetime(raw).strftime('%H:%M:%S') }}
+            {# time-only input_datetime: combine with next occurrence #}
+            {% set now_dt = now() %}
+            {% set today_dt = now_dt.replace(
+                hour=state_val.split(':')[0]|int,
+                minute=state_val.split(':')[1]|int,
+                second=0, microsecond=0
+            ) %}
+            {{ as_timestamp(today_dt if today_dt > now_dt else today_dt + timedelta(days=1)) }}
           {% endif %}
         {% else %}
-          00:00:00
+          0
         {% endif %}
       time_stamp_duration: !input sunrise_start
       duration: >
         {% set parts = time_stamp_duration.split(":") %}
-        {{ (parts[0]|int)*3600 + (parts[1]|int)*60 + (parts[2]|int) }}
+        {{ (parts[0]|int|abs)*3600 + (parts[1]|int)*60 + (parts[2]|int) }}
+
       progress: >
-        {{ [0, [1, ((duration - (as_timestamp(today_at(wake_time)) -
-        as_timestamp(now()))) / duration)] | min] | max | float() }}
+        {{ (1 - (timestamp_value - as_timestamp(now())) / duration) | round(3) | float}}
       last_light_update: >-
         {{ [states[target_light.entity_id].attributes.brightness,
         states[target_light.entity_id].attributes.rgb_color] }}
 
   - variables:
       brightness_value: !input brightness_curve
-      warmth_value: !input warmth_curve
+      color_value: !input color_curve
 
   - repeat:
       until:
         - condition: or
           conditions:
             - condition: time
-              after: input_datetime.wake_up_light
+              after: !input time_entity
             - condition: template
               value_template: >
                 {{ last_light_update !=
@@ -165,12 +173,11 @@ actions:
       sequence:
         - variables:
             progress: >
-              {{ [0, [1, ((duration - (as_timestamp(today_at(wake_time)) -
-              as_timestamp(now()))) / duration)] | min] | max | float() }}
+              {{ (1 - (timestamp_value - as_timestamp(now())) / duration) | round(3) | float}}
 
         - variables:
             brightness_value: !input brightness_curve
-            warmth_value: !input warmth_curve
+            color_value: !input color_curve
 
         - target:
             entity_id: "{{ target_light.entity_id }}"
@@ -178,9 +185,14 @@ actions:
             brightness_pct: >-
               {{ max((brightness_value | float) * (max_brightness | float), 1)
               }}
-            color_temp_kelvin: >-
-              {{kelvin_start | float + (warmth_value | float) * (kelvin_end -
-              kelvin_start)}}
+            rgb_color: >-
+              {{
+                [
+                  rgb_start[0] + color_value | float * (rgb_end[0] - rgb_start[0]) | int,
+                  rgb_start[1] + color_value | float * (rgb_end[1] - rgb_start[1]) | int,
+                  rgb_start[2] + color_value | float * (rgb_end[2] - rgb_start[2]) | int
+                ]
+              }}
             transition: !input transition_time
           action: light.turn_on
 
@@ -188,10 +200,18 @@ actions:
             last_light_update: >-
               {{ [states[target_light.entity_id].attributes.brightness,
               states[target_light.entity_id].attributes.rgb_color] }}
+
+        - service: system_log.write
+          data:
+            message: >
+              brightness: {{brightness_value}} timestamp:{{timestamp_value}} now:{{as_timestamp(now())}} progress:{{progress}} continue?:{{last_light_update ==
+                [states[target_light.entity_id].attributes.brightness,
+                states[target_light.entity_id].attributes.rgb_color]}}
+            level: warning
         - delay:
             hours: 0
             minutes: 0
-            seconds: !input update_frequenzy
+            seconds: !input update_frequency
             milliseconds: 0
     enabled: true
 
@@ -199,7 +219,7 @@ actions:
       - conditions:
           - condition: template
             value_template: >
-              {{ last_light_update !=
+              {{ last_light_update ==
               [states[target_light.entity_id].attributes.brightness,
               states[target_light.entity_id].attributes.rgb_color]}}
         sequence:
@@ -208,8 +228,8 @@ actions:
             data:
               brightness_pct: |
                 {{ max_brightness | int }}
-              color_temp_kelvin: |
-                {{kelvin_end | int }}
+              rgb_color: |
+                {{rgb_end}}
               transition: !input transition_time
             action: light.turn_on
 
