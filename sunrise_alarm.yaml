@@ -151,7 +151,7 @@ actions:
       progress: >
         {{ (1 - (timestamp_value - as_timestamp(now())) / duration) | round(3) | float}}
       last_light_update: >-
-        {{ None }}
+        {{ states[target_light.entity_id].last_updated }}
 
   - variables:
       brightness_value: !input brightness_curve
@@ -165,7 +165,7 @@ actions:
               after: !input time_entity
             - condition: template
               value_template: >
-                {{ (last_light_update | string) != (states[target_light.entity_id].last_changed | string)}}
+                {{ (last_light_update | string) != (states[target_light.entity_id].last_updated | string)}}
               enabled: true
       sequence:
         - variables:
@@ -195,27 +195,22 @@ actions:
             rgb_color: "{{ rgb_value }}"
             transition: !input transition_time
           action: light.turn_on
-        - delay: "00:00:01"
         - variables:
             last_light_update: >-
-              {{ states[target_light.entity_id].last_changed }}
+              {{ states[target_light.entity_id].last_updated }}
 
         - delay:
             hours: 0
             minutes: 0
             seconds: !input update_frequency
             milliseconds: 0
-        - service: system_log.write
-          data:
-            message: "last:{{last_light_update}} current:{{states[target_light.entity_id].last_changed}} {{(last_light_update | string) == (states[target_light.entity_id].last_changed | string)}}"
-            level: warning
     enabled: true
 
   - choose:
       - conditions:
           - condition: template
             value_template: >
-              {{ (last_light_update | string) == (states[target_light.entity_id].last_changed | string)}}
+              {{ (last_light_update | string) == (states[target_light.entity_id].last_updated | string)}}
         sequence:
           - target:
               entity_id: "{{ target_light.entity_id }}"
