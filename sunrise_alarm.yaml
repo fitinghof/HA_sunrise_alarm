@@ -39,11 +39,11 @@ blueprint:
     max_brightness:
       name: Max brightness
       description: The maximum brightness that should have been reached when the alarm goes off
-      default: 100
+      default: 255
       selector:
         number:
           min: 0
-          max: 100
+          max: 255
 
     post_alarm_actions:
       name: Post alarm actions
@@ -180,10 +180,9 @@ actions:
             color_value: !input color_curve
 
         - variables:
-            brightness_procent: >-
-              {{ max((brightness_value | float) * (max_brightness | float), 1)
-              }}
-            rgb_value: >-
+            brightness: >
+              {{ max((brightness_value | float) * (max_brightness | float), 1) | int }}
+            rgb_value: >
               {{
                 [
                   rgb_start[0] + color_value | float * (rgb_end[0] - rgb_start[0]) | int,
@@ -195,14 +194,14 @@ actions:
         - target:
             entity_id: "{{ target_light.entity_id }}"
           data:
-            brightness_pct: "{{ brightness_procent }}"
+            brightness: "{{ brightness }}"
             rgb_color: "{{ rgb_value }}"
             transition: !input transition_time
           action: light.turn_on
-
+        - delay: "00:00:01"
         - variables:
             last_light_update: >-
-              {{ [brightness_procent, rgb_value] }}
+              {{ [states[target_light.entity_id].attributes.brightness, states[target_light.entity_id].attributes.rgb_color] }}
 
         - delay:
             hours: 0
@@ -212,9 +211,8 @@ actions:
         - service: system_log.write
           data:
             message: >
-              brightness: {{brightness_value}} timestamp:{{timestamp_value}} now:{{as_timestamp(now())}} progress:{{progress}} continue?:{{last_light_update ==
-                [states[target_light.entity_id].attributes.brightness,
-                states[target_light.entity_id].attributes.rgb_color]}}
+              last:{{last_light_update}} current:{{[states[target_light.entity_id].attributes.brightness,states[target_light.entity_id].attributes.rgb_color]}} {{states[target_light.entity_id].attributes.brightness == states[target_light.entity_id].attributes.rgb_color}}
+              timestamp:{{timestamp_value}} now:{{as_timestamp(now())}} progress:{{progress}}
             level: warning
     enabled: true
 
