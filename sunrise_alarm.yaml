@@ -39,11 +39,11 @@ blueprint:
     max_brightness:
       name: Max brightness
       description: The maximum brightness that should have been reached when the alarm goes off
-      default: 255
+      default: 100
       selector:
         number:
           min: 0
-          max: 255
+          max: 100
 
     post_alarm_actions:
       name: Post alarm actions
@@ -151,8 +151,7 @@ actions:
       progress: >
         {{ (1 - (timestamp_value - as_timestamp(now())) / duration) | round(3) | float}}
       last_light_update: >-
-        {{ [states[target_light.entity_id].attributes.brightness,
-        states[target_light.entity_id].attributes.rgb_color] }}
+        {{ None }}
 
   - variables:
       brightness_value: !input brightness_curve
@@ -166,9 +165,7 @@ actions:
               after: !input time_entity
             - condition: template
               value_template: >
-                {{ last_light_update !=
-                [states[target_light.entity_id].attributes.brightness,
-                states[target_light.entity_id].attributes.rgb_color]}}
+                {{ (last_light_update | string) != (states[target_light.entity_id].last_changed | string)}}
               enabled: true
       sequence:
         - variables:
@@ -194,14 +191,14 @@ actions:
         - target:
             entity_id: "{{ target_light.entity_id }}"
           data:
-            brightness: "{{ brightness }}"
+            brightness_pct: "{{ brightness }}"
             rgb_color: "{{ rgb_value }}"
             transition: !input transition_time
           action: light.turn_on
         - delay: "00:00:01"
         - variables:
             last_light_update: >-
-              {{ [states[target_light.entity_id].attributes.brightness, states[target_light.entity_id].attributes.rgb_color] }}
+              {{ states[target_light.entity_id].last_changed }}
 
         - delay:
             hours: 0
@@ -210,9 +207,7 @@ actions:
             milliseconds: 0
         - service: system_log.write
           data:
-            message: >
-              last:{{last_light_update}} current:{{[states[target_light.entity_id].attributes.brightness,states[target_light.entity_id].attributes.rgb_color]}} {{states[target_light.entity_id].attributes.brightness == states[target_light.entity_id].attributes.rgb_color}}
-              timestamp:{{timestamp_value}} now:{{as_timestamp(now())}} progress:{{progress}}
+            message: "last:{{last_light_update}} current:{{states[target_light.entity_id].last_changed}} {{(last_light_update | string) == (states[target_light.entity_id].last_changed | string)}}"
             level: warning
     enabled: true
 
@@ -220,9 +215,7 @@ actions:
       - conditions:
           - condition: template
             value_template: >
-              {{ last_light_update ==
-              [states[target_light.entity_id].attributes.brightness,
-              states[target_light.entity_id].attributes.rgb_color]}}
+              {{ (last_light_update | string) == (states[target_light.entity_id].last_changed | string)}}
         sequence:
           - target:
               entity_id: "{{ target_light.entity_id }}"
