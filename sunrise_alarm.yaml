@@ -196,7 +196,7 @@ actions:
             entity_id: "{{ target_light.entity_id }}"
           data:
             brightness_pct: "{{ brightness_procent }}"
-            rgb_color: "rgb_value"
+            rgb_color: "{{ rgb_value }}"
             transition: !input transition_time
           action: light.turn_on
 
