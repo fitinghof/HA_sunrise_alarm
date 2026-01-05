@@ -179,13 +179,11 @@ actions:
             brightness_value: !input brightness_curve
             color_value: !input color_curve
 
-        - target:
-            entity_id: "{{ target_light.entity_id }}"
-          data:
-            brightness_pct: >-
+        - variables:
+            brightness_procent: >-
               {{ max((brightness_value | float) * (max_brightness | float), 1)
               }}
-            rgb_color: >-
+            rgb_value: >-
               {{
                 [
                   rgb_start[0] + color_value | float * (rgb_end[0] - rgb_start[0]) | int,
@@ -193,13 +191,18 @@ actions:
                   rgb_start[2] + color_value | float * (rgb_end[2] - rgb_start[2]) | int
                 ]
               }}
+
+        - target:
+            entity_id: "{{ target_light.entity_id }}"
+          data:
+            brightness_pct: "{{ brightness_procent }}"
+            rgb_color: "rgb_value"
             transition: !input transition_time
           action: light.turn_on
 
         - variables:
             last_light_update: >-
-              {{ [states[target_light.entity_id].attributes.brightness,
-              states[target_light.entity_id].attributes.rgb_color] }}
+              {{ [brightness_procent, rgb_value] }}
 
         - delay:
             hours: 0
