@@ -201,6 +201,11 @@ actions:
               {{ [states[target_light.entity_id].attributes.brightness,
               states[target_light.entity_id].attributes.rgb_color] }}
 
+        - delay:
+            hours: 0
+            minutes: 0
+            seconds: !input update_frequency
+            milliseconds: 0
         - service: system_log.write
           data:
             message: >
@@ -208,11 +213,6 @@ actions:
                 [states[target_light.entity_id].attributes.brightness,
                 states[target_light.entity_id].attributes.rgb_color]}}
             level: warning
-        - delay:
-            hours: 0
-            minutes: 0
-            seconds: !input update_frequency
-            milliseconds: 0
     enabled: true
 
   - choose:
